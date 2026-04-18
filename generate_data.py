@@ -34,6 +34,9 @@ def build_data() -> dict:
                 "round_pick": pick.round_pick,
                 "team": pick.team,
                 "player": pick.player,
+                "position": pick.position,
+                "college": pick.college,
+                "bio_url": pick.bio_url,
             }
             for pick in picks
         ],

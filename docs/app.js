@@ -95,6 +95,15 @@ function simulateDraftLocally() {
 // UI rendering
 // ---------------------------------------------------------------------------
 
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function renderTable(container, headers, rows) {
   const thead = `<thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead>`;
   const tbody = `<tbody>${rows
@@ -133,18 +142,39 @@ function initUI(picks, source, generatedAt) {
     teamSelect.insertAdjacentHTML("beforeend", `<option value="${team}">${team}</option>`);
   });
 
+  function playerCell(pick) {
+    const name = escapeHtml(pick.player || "");
+    const url = pick.bio_url || "";
+    return url
+      ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${name}</a>`
+      : name;
+  }
+
   function showRound(roundNumber) {
     const rows = picks
       .filter((pick) => pick.round_number === Number(roundNumber))
-      .map((pick) => [pick.overall_pick, `Round ${pick.round_number} Pick ${pick.round_pick}`, pick.team, pick.player]);
-    renderTable(roundResults, ["Overall", "Slot", "Team", "Player"], rows);
+      .map((pick) => [
+        pick.overall_pick,
+        `Round ${pick.round_number} Pick ${pick.round_pick}`,
+        pick.team,
+        playerCell(pick),
+        pick.position || "",
+        pick.college || "",
+      ]);
+    renderTable(roundResults, ["Overall", "Slot", "Team", "Player", "Pos", "College"], rows);
   }
 
   function showTeam(team) {
     const rows = picks
       .filter((pick) => pick.team === team)
-      .map((pick) => [pick.overall_pick, `Round ${pick.round_number} Pick ${pick.round_pick}`, pick.player]);
-    renderTable(teamResults, ["Overall", "Pick", "Player"], rows);
+      .map((pick) => [
+        pick.overall_pick,
+        `Round ${pick.round_number} Pick ${pick.round_pick}`,
+        playerCell(pick),
+        pick.position || "",
+        pick.college || "",
+      ]);
+    renderTable(teamResults, ["Overall", "Pick", "Player", "Pos", "College"], rows);
   }
 
   roundSelect.addEventListener("change", () => showRound(roundSelect.value));

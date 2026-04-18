@@ -5,10 +5,11 @@ import csv
 from dataclasses import dataclass
 from functools import lru_cache
 from io import StringIO
+import pathlib
 from random import Random
 from urllib.error import URLError
 from urllib.request import urlopen
-from typing import Iterable, List
+from typing import Iterable, List, Union
 
 
 NFL_TEAMS = [
@@ -84,6 +85,16 @@ NFL_TEAM_ABBREVIATIONS: dict[str, str] = {
 
 
 @dataclass(frozen=True)
+class ProspectInfo:
+    """Prospect metadata loaded from the Drafttek rankings CSV."""
+
+    name: str
+    position: str = ""
+    college: str = ""
+    bio_url: str = ""
+
+
+@dataclass(frozen=True)
 class DraftPick:
     year: int
     overall_pick: int
@@ -91,6 +102,9 @@ class DraftPick:
     round_pick: int
     team: str
     player: str
+    position: str = ""
+    college: str = ""
+    bio_url: str = ""
 
 
 def _default_prospects(total_players: int) -> List[str]:
@@ -131,6 +145,57 @@ def _fetch_real_2026_prospects() -> List[str]:
 @lru_cache(maxsize=1)
 def get_real_2026_prospects() -> List[str]:
     return _fetch_real_2026_prospects()
+
+
+# ---------------------------------------------------------------------------
+# Drafttek prospect loader – primary local source for simulation
+# ---------------------------------------------------------------------------
+
+DRAFTTEK_CSV_PATH = pathlib.Path(__file__).parent / "drafttek_2026_top600_with_bio.csv"
+
+
+def _load_drafttek_prospects_from_csv_text(csv_text: str) -> List[ProspectInfo]:
+    """Parse a Drafttek rankings CSV and return a list of :class:`ProspectInfo`.
+
+    The CSV is expected to have at minimum a ``Prospect`` column.  ``POS``,
+    ``College``, and ``Bio_URL`` columns are used when present.  Rows with a
+    blank ``Prospect`` value are silently skipped.
+    """
+    prospects: List[ProspectInfo] = []
+    for row in csv.DictReader(StringIO(csv_text)):
+        name = row.get("Prospect", "").strip()
+        if not name:
+            continue
+        prospects.append(
+            ProspectInfo(
+                name=name,
+                position=row.get("POS", "").strip(),
+                college=row.get("College", "").strip(),
+                bio_url=(row.get("Bio_URL") or "").strip(),
+            )
+        )
+    return prospects
+
+
+def _load_drafttek_prospects() -> List[ProspectInfo]:
+    """Load prospects from the local Drafttek CSV file.
+
+    Returns an empty list if the file is missing or unreadable.
+    """
+    try:
+        csv_text = DRAFTTEK_CSV_PATH.read_text(encoding="utf-8")
+        prospects = _load_drafttek_prospects_from_csv_text(csv_text)
+        if prospects:
+            return prospects
+    except OSError:
+        pass
+    return []
+
+
+@lru_cache(maxsize=1)
+def get_drafttek_2026_prospects() -> List[ProspectInfo]:
+    """Return cached Drafttek 2026 top-600 prospects (primary simulation source)."""
+    return _load_drafttek_prospects()
 
 
 def _fetch_actual_draft_picks(year: int) -> List[DraftPick]:
@@ -197,8 +262,17 @@ def simulate_draft(
     rounds: int = 7,
     teams: Iterable[str] = NFL_TEAMS,
     random_seed: int = 2026,
-    prospects: Iterable[str] | None = None,
+    prospects: Union[Iterable[Union[str, ProspectInfo]], None] = None,
 ) -> List[DraftPick]:
+    """Simulate a draft and return a list of :class:`DraftPick` objects.
+
+    *prospects* may contain plain name strings or :class:`ProspectInfo` objects.
+    When *prospects* is ``None`` the fallback chain is applied:
+
+    1. Local Drafttek CSV (``drafttek_2026_top600_with_bio.csv``).
+    2. Remote mock-draft CSV (cwecht15/Mock-Draft-Database on GitHub).
+    3. Generated placeholder names.
+    """
     team_order = list(teams)
     if not team_order:
         raise ValueError("At least one team is required to simulate a draft.")
@@ -206,16 +280,31 @@ def simulate_draft(
         raise ValueError("Rounds must be greater than zero.")
 
     total_picks = rounds * len(team_order)
-    real_prospects = list(prospects) if prospects is not None else get_real_2026_prospects()
-    randomized_prospects = real_prospects[:total_picks]
-    if len(randomized_prospects) < total_picks:
-        randomized_prospects.extend(_default_prospects(total_picks - len(randomized_prospects)))
-    Random(random_seed).shuffle(randomized_prospects)
+
+    # Build a normalized list of ProspectInfo regardless of input type.
+    if prospects is not None:
+        prospect_infos: List[ProspectInfo] = [
+            p if isinstance(p, ProspectInfo) else ProspectInfo(name=str(p))
+            for p in prospects
+        ]
+    else:
+        # Fallback chain: local Drafttek → remote mock-draft CSV → placeholders
+        prospect_infos = get_drafttek_2026_prospects()
+        if not prospect_infos:
+            prospect_infos = [ProspectInfo(name=n) for n in get_real_2026_prospects()]
+
+    randomized = prospect_infos[:total_picks]
+    if len(randomized) < total_picks:
+        randomized = randomized + [
+            ProspectInfo(name=p) for p in _default_prospects(total_picks - len(randomized))
+        ]
+    Random(random_seed).shuffle(randomized)
 
     picks: List[DraftPick] = []
     overall_pick = 1
     for round_number in range(1, rounds + 1):
         for round_pick, team in enumerate(team_order, start=1):
+            info = randomized[overall_pick - 1]
             picks.append(
                 DraftPick(
                     year=year,
@@ -223,7 +312,10 @@ def simulate_draft(
                     round_number=round_number,
                     round_pick=round_pick,
                     team=team,
-                    player=randomized_prospects[overall_pick - 1],
+                    player=info.name,
+                    position=info.position,
+                    college=info.college,
+                    bio_url=info.bio_url,
                 )
             )
             overall_pick += 1
