@@ -71,7 +71,11 @@ DEFAULT_PROSPECT_SOURCE_TIMEOUT_SECONDS = 5.0
 
 def _load_prospects_from_csv_text(csv_text: str) -> List[str]:
     rows = csv.DictReader(StringIO(csv_text))
-    prospects = [player_name for row in rows if (player_name := row.get("player_name", "").strip())]
+    prospects: List[str] = []
+    for row in rows:
+        player_name = row.get("player_name", "").strip()
+        if player_name:
+            prospects.append(player_name)
     return prospects
 
 
@@ -83,6 +87,7 @@ def _fetch_real_2026_prospects() -> List[str]:
         if prospects:
             return prospects
     except (OSError, URLError, ValueError):
+        # ValueError can occur while decoding invalid response bytes or parsing malformed CSV.
         pass
     return []
 

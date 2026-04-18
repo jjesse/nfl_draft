@@ -2,7 +2,7 @@ import unittest
 from collections import Counter
 from unittest.mock import Mock, patch
 
-from nfl_draft import _fetch_real_2026_prospects, get_team_picks, simulate_draft
+from nfl_draft import _fetch_real_2026_prospects, _load_prospects_from_csv_text, get_team_picks, simulate_draft
 
 
 def _test_prospects(count: int = 224) -> list[str]:
@@ -40,6 +40,18 @@ class DraftSimulationTests(unittest.TestCase):
         prospects = _fetch_real_2026_prospects()
 
         self.assertEqual(["Caleb Downs", "Jeremiyah Love"], prospects)
+
+    def test_load_prospects_from_csv_text_filters_blank_names(self) -> None:
+        csv_text = (
+            "player_name,player_position\n"
+            "Caleb Downs,S\n"
+            ",CB\n"
+            "Jeremiyah Love,RB\n"
+        )
+        self.assertEqual(
+            ["Caleb Downs", "Jeremiyah Love"],
+            _load_prospects_from_csv_text(csv_text),
+        )
 
 
 if __name__ == "__main__":
