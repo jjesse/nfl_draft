@@ -38,6 +38,28 @@ from `nfl_data_py` or a simulated draft.
 python nfl_draft.py --team "Dallas Cowboys"
 ```
 
+## GitHub Actions – automatic data refresh
+
+A scheduled workflow (`.github/workflows/update_draft.yml`) runs every day at
+noon UTC and refreshes `docs/draft_data.json` automatically:
+
+1. It installs the Python dependencies from `requirements.txt`.
+2. It runs `generate_data.py`, which tries `nfl_data_py` first and falls back
+   to a simulation when real picks are not yet available.
+3. If the generated file changed, it commits and pushes the update to the
+   repository. GitHub Pages then serves the fresh data immediately.
+
+You can also trigger the workflow manually from
+**Actions → Update Draft Data → Run workflow**.
+
+To run the data generation locally:
+
+```bash
+python generate_data.py
+```
+
+This writes `docs/draft_data.json`, which the web UI fetches on load.
+
 ## Web UI (GitHub Pages)
 
 The web app is in `/docs`:

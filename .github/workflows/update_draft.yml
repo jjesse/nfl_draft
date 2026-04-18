@@ -1,0 +1,42 @@
+name: Update Draft Data
+
+on:
+  schedule:
+    # Run daily at noon UTC so the page stays fresh after the draft
+    - cron: "0 12 * * *"
+  workflow_dispatch: # Allow triggering manually from the Actions tab
+
+permissions:
+  contents: write # Needed to commit draft_data.json back to the repo
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate draft data
+        run: python generate_data.py
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/draft_data.json
+          if git diff --cached --quiet; then
+            echo "No changes to draft_data.json – skipping commit."
+          else
+            git commit -m "chore: update draft data [skip ci]"
+            git push
+          fi

@@ -20,6 +20,12 @@ h1 {
   color: #4b5563;
 }
 
+.source-banner {
+  margin-top: 0;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
 .tabs {
   display: flex;
   gap: 0.5rem;
