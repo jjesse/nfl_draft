@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser
+import csv
 from dataclasses import dataclass
+from functools import lru_cache
+from io import StringIO
 from random import Random
+from urllib.error import URLError
+from urllib.request import urlopen
 from typing import Iterable, List
 
 
@@ -56,12 +61,42 @@ def _default_prospects(total_players: int) -> List[str]:
     return [f"Prospect {index:03d}" for index in range(1, total_players + 1)]
 
 
+DEFAULT_PROSPECT_SOURCE_URL = (
+    "https://raw.githubusercontent.com/cwecht15/Mock-Draft-Database/"
+    "7d86e94057b0f1b200791d4f40b898575efe7f0f/"
+    "data/processed/2026/teams__player_trends.csv"
+)
+
+
+def _load_prospects_from_csv_text(csv_text: str) -> List[str]:
+    rows = csv.DictReader(StringIO(csv_text))
+    prospects = [row["player_name"].strip() for row in rows if row.get("player_name", "").strip()]
+    return prospects
+
+
+@lru_cache(maxsize=1)
+def get_real_2026_prospects(
+    source_url: str = DEFAULT_PROSPECT_SOURCE_URL,
+    timeout_seconds: float = 5.0,
+) -> List[str]:
+    try:
+        with urlopen(source_url, timeout=timeout_seconds) as response:
+            csv_text = response.read().decode("utf-8")
+        prospects = _load_prospects_from_csv_text(csv_text)
+        if prospects:
+            return prospects
+    except (OSError, URLError, ValueError):
+        pass
+    return []
+
+
 def simulate_draft(
     *,
     year: int = 2026,
     rounds: int = 7,
     teams: Iterable[str] = NFL_TEAMS,
     random_seed: int = 2026,
+    prospects: Iterable[str] | None = None,
 ) -> List[DraftPick]:
     team_order = list(teams)
     if not team_order:
@@ -70,7 +105,10 @@ def simulate_draft(
         raise ValueError("Rounds must be greater than zero.")
 
     total_picks = rounds * len(team_order)
-    randomized_prospects = _default_prospects(total_picks)
+    real_prospects = list(prospects) if prospects is not None else get_real_2026_prospects()
+    randomized_prospects = real_prospects[:total_picks]
+    if len(randomized_prospects) < total_picks:
+        randomized_prospects.extend(_default_prospects(total_picks - len(randomized_prospects)))
     Random(random_seed).shuffle(randomized_prospects)
 
     picks: List[DraftPick] = []
