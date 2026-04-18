@@ -71,7 +71,7 @@ DEFAULT_PROSPECT_SOURCE_TIMEOUT_SECONDS = 5.0
 
 def _load_prospects_from_csv_text(csv_text: str) -> List[str]:
     rows = csv.DictReader(StringIO(csv_text))
-    prospects = [row["player_name"].strip() for row in rows if row.get("player_name", "").strip()]
+    prospects = [player_name for row in rows if (player_name := row.get("player_name", "").strip())]
     return prospects
 
 
