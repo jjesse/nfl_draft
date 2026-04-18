@@ -46,6 +46,42 @@ NFL_TEAMS = [
     "Washington Commanders",
 ]
 
+# Maps nfl_data_py team abbreviations to full team names used throughout this project.
+NFL_TEAM_ABBREVIATIONS: dict[str, str] = {
+    "ARI": "Arizona Cardinals",
+    "ATL": "Atlanta Falcons",
+    "BAL": "Baltimore Ravens",
+    "BUF": "Buffalo Bills",
+    "CAR": "Carolina Panthers",
+    "CHI": "Chicago Bears",
+    "CIN": "Cincinnati Bengals",
+    "CLE": "Cleveland Browns",
+    "DAL": "Dallas Cowboys",
+    "DEN": "Denver Broncos",
+    "DET": "Detroit Lions",
+    "GNB": "Green Bay Packers",
+    "HOU": "Houston Texans",
+    "IND": "Indianapolis Colts",
+    "JAX": "Jacksonville Jaguars",
+    "KAN": "Kansas City Chiefs",
+    "LAC": "Los Angeles Chargers",
+    "LAR": "Los Angeles Rams",
+    "LVR": "Las Vegas Raiders",
+    "MIA": "Miami Dolphins",
+    "MIN": "Minnesota Vikings",
+    "NOR": "New Orleans Saints",
+    "NWE": "New England Patriots",
+    "NYG": "New York Giants",
+    "NYJ": "New York Jets",
+    "PHI": "Philadelphia Eagles",
+    "PIT": "Pittsburgh Steelers",
+    "SEA": "Seattle Seahawks",
+    "SFO": "San Francisco 49ers",
+    "TAM": "Tampa Bay Buccaneers",
+    "TEN": "Tennessee Titans",
+    "WAS": "Washington Commanders",
+}
+
 
 @dataclass(frozen=True)
 class DraftPick:
@@ -95,6 +131,64 @@ def _fetch_real_2026_prospects() -> List[str]:
 @lru_cache(maxsize=1)
 def get_real_2026_prospects() -> List[str]:
     return _fetch_real_2026_prospects()
+
+
+def _fetch_actual_draft_picks(year: int) -> List[DraftPick]:
+    """Fetch completed draft picks from nfl_data_py for *year*.
+
+    Returns an empty list when:
+    - ``nfl_data_py`` is not installed, or
+    - no data is available yet for the requested year (e.g. pre-draft).
+    """
+    try:
+        import nfl_data_py as nfl  # optional heavy dependency
+    except ModuleNotFoundError:
+        return []
+
+    try:
+        df = nfl.import_draft_picks([year])
+    except Exception:
+        return []
+
+    if df is None or df.empty:
+        return []
+
+    picks: List[DraftPick] = []
+    # Compute the pick number within each round from the global pick order.
+    round_pick_counter: dict[int, int] = {}
+    for _, row in df.sort_values("pick").iterrows():
+        round_number = int(row["round"])
+        round_pick_counter[round_number] = round_pick_counter.get(round_number, 0) + 1
+
+        team_abbr = str(row.get("team", ""))
+        team_name = NFL_TEAM_ABBREVIATIONS.get(team_abbr, team_abbr)
+
+        player_name = str(row.get("pfr_player_name", "")).strip()
+        if not player_name:
+            player_name = f"Player {int(row['pick'])}"
+
+        picks.append(
+            DraftPick(
+                year=int(row["season"]),
+                overall_pick=int(row["pick"]),
+                round_number=round_number,
+                round_pick=round_pick_counter[round_number],
+                team=team_name,
+                player=player_name,
+            )
+        )
+
+    return picks
+
+
+@lru_cache(maxsize=8)
+def import_actual_draft_picks(year: int) -> List[DraftPick]:
+    """Return real, completed draft picks for *year* sourced from nfl_data_py.
+
+    Returns an empty list when the data is not yet available (e.g. the draft
+    has not taken place) or when ``nfl_data_py`` is not installed.
+    """
+    return _fetch_actual_draft_picks(year)
 
 
 def simulate_draft(
@@ -155,13 +249,22 @@ def main() -> None:
     parser = _parse_args()
     args = parser.parse_args()
 
-    picks = simulate_draft()
+    # Prefer actual completed draft picks from nfl_data_py; fall back to simulation.
+    actual_picks = import_actual_draft_picks(2026)
+    if actual_picks:
+        picks = actual_picks
+        source = "nfl_data_py"
+    else:
+        picks = simulate_draft()
+        source = "simulation (nfl_data_py data not yet available)"
+
     selected_picks = picks if not args.team else get_team_picks(picks, args.team)
 
     if args.team and not selected_picks:
         available_teams = ", ".join(NFL_TEAMS)
         raise SystemExit(f"Unknown team '{args.team}'. Valid teams: {available_teams}")
 
+    print(f"# Source: {source}")
     for pick in selected_picks:
         print(
             f"#{pick.overall_pick:03d} | Round {pick.round_number} Pick {pick.round_pick:02d} | "
