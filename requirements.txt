@@ -1,0 +1,2 @@
+nfl-data-py>=0.3.3
+pyarrow>=10.0

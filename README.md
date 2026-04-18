@@ -5,17 +5,32 @@
 - a Python CLI for draft simulation and team lookup
 - a static web UI for GitHub Pages (round-by-round and team-by-team views)
 
-By default, the CLI simulator pulls real 2026 player names from the public
-Mock-Draft-Database dataset and falls back to generated placeholders only if
-the remote source is unavailable.
+By default, the CLI tries to load **real 2026 draft picks** from the
+[`nfl_data_py`](https://pypi.org/project/nfl-data-py/) package (sourced from
+the [nflverse](https://github.com/nflverse) project). This data becomes
+available after the draft concludes. Until then, the CLI falls back to a
+simulated draft using real 2026 player names from the public
+Mock-Draft-Database dataset (or generated placeholders if that source is also
+unavailable).
+
+## Setup
+
+Install Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
 
 ## Python CLI usage
 
-### Run a full 7-round simulation (224 picks)
+### Run a full 7-round draft (real picks when available, simulation otherwise)
 
 ```bash
 python nfl_draft.py
 ```
+
+The header line (`# Source: …`) tells you whether you are viewing real picks
+from `nfl_data_py` or a simulated draft.
 
 ### View picks for a single team (example: Dallas Cowboys)
 
