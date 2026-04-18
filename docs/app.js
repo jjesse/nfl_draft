@@ -184,7 +184,8 @@ async function init() {
     picks = data.picks;
     source = data.source;
     generatedAt = data.generated_at;
-  } catch (_err) {
+  } catch (err) {
+    console.warn("Failed to load draft_data.json, falling back to browser simulation:", err);
     const fallback = simulateDraftLocally();
     picks = fallback.picks;
     source = fallback.source;
