@@ -82,7 +82,37 @@ To publish on GitHub Pages for this repository:
 
 To include it from `jjesse.github.io`, link to the published `nfl_draft` page.
 
-## Run tests
+## Drafttek prospect data
+
+The simulator uses the Drafttek 2026 top-600 big board as the primary player
+pool for simulated drafts. The data is stored locally so no internet access is
+required at runtime:
+
+- `drafttek_2026_top600_with_bio.csv` – ranked prospect list with position,
+  college, height, weight, class, and bio URL.
+- `drafttek_2026_top600_with_bio.json` – the same data in JSON format.
+
+The simulation fallback order is:
+
+1. **Real picks** from `nfl_data_py` (used after the draft concludes).
+2. **Drafttek top-600 CSV** (primary simulation source, sorted by rank).
+3. **Mock-Draft-Database remote CSV** (secondary simulation source).
+4. **Generated placeholders** (`Prospect 001`, `Prospect 002`, …).
+
+### Refreshing the Drafttek data
+
+`scrape_draftek_bio.py` is a standalone utility script that re-scrapes the
+[DraftTek big board](https://www.drafttek.com/2026-NFL-Draft-Big-Board/) and
+overwrites the two data files above. Run it manually when you want to pull
+fresh rankings:
+
+```bash
+pip install requests beautifulsoup4 pandas tqdm
+python scrape_draftek_bio.py
+```
+
+After running the scraper, commit the updated CSV/JSON files and run
+`python generate_data.py` to regenerate `docs/draft_data.json`.
 
 ```bash
 python -m unittest discover -s tests -v

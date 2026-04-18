@@ -4,9 +4,12 @@ from unittest.mock import MagicMock, Mock, patch
 
 from nfl_draft import (
     NFL_TEAM_ABBREVIATIONS,
+    ProspectInfo,
     _fetch_actual_draft_picks,
     _fetch_real_2026_prospects,
+    _load_drafttek_prospects_from_csv_text,
     _load_prospects_from_csv_text,
+    get_drafttek_2026_prospects,
     get_team_picks,
     import_actual_draft_picks,
     simulate_draft,
@@ -189,6 +192,100 @@ class ImportActualDraftPicksTests(unittest.TestCase):
 
         # Restore cache state
         import_actual_draft_picks.cache_clear()
+
+
+class DrafttekProspectLoaderTests(unittest.TestCase):
+    """Tests for the Drafttek CSV prospect loader."""
+
+    _SAMPLE_CSV = (
+        "Rank,CNG,Prospect,College,POS,Ht,Wt,CLS,Bio_URL\n"
+        "1,--,Fernando Mendoza,Indiana,QB,6'5\",236,RJR,https://iuhoosiers.com/roster/fernando-mendoza\n"
+        "2,--,Arvell Reese,Ohio State,EDGE,6'4\",241,JR,https://ohiostatebuckeyes.com/roster/arvell-reese\n"
+        "3,--,,Notre Dame,RB,6'0\",212,JR,\n"
+    )
+
+    def test_parses_prospect_name_position_college_bio_url(self) -> None:
+        prospects = _load_drafttek_prospects_from_csv_text(self._SAMPLE_CSV)
+        self.assertEqual(2, len(prospects))
+        first = prospects[0]
+        self.assertEqual("Fernando Mendoza", first.name)
+        self.assertEqual("QB", first.position)
+        self.assertEqual("Indiana", first.college)
+        self.assertEqual("https://iuhoosiers.com/roster/fernando-mendoza", first.bio_url)
+
+    def test_filters_rows_with_blank_prospect_name(self) -> None:
+        prospects = _load_drafttek_prospects_from_csv_text(self._SAMPLE_CSV)
+        names = [p.name for p in prospects]
+        self.assertNotIn("", names)
+        self.assertEqual(2, len(prospects))
+
+    def test_returns_prospect_info_instances(self) -> None:
+        prospects = _load_drafttek_prospects_from_csv_text(self._SAMPLE_CSV)
+        self.assertTrue(all(isinstance(p, ProspectInfo) for p in prospects))
+
+    def test_missing_bio_url_defaults_to_empty_string(self) -> None:
+        csv_text = (
+            "Rank,CNG,Prospect,College,POS,Ht,Wt,CLS,Bio_URL\n"
+            "1,--,Test Player,State U,WR,6'0\",190,SR,\n"
+        )
+        prospects = _load_drafttek_prospects_from_csv_text(csv_text)
+        self.assertEqual("", prospects[0].bio_url)
+
+    def test_simulate_draft_uses_drafttek_prospects_as_primary_fallback(self) -> None:
+        drafttek_infos = [ProspectInfo(name=f"DT Player {i}", position="WR", college="State U") for i in range(1, 300)]
+        with patch("nfl_draft.get_drafttek_2026_prospects", return_value=drafttek_infos):
+            picks = simulate_draft()
+        self.assertEqual(224, len(picks))
+        # All players should come from the drafttek list
+        pick_names = {pick.player for pick in picks}
+        drafttek_names = {p.name for p in drafttek_infos}
+        self.assertTrue(pick_names.issubset(drafttek_names))
+
+    def test_simulate_draft_carries_metadata_from_drafttek_prospects(self) -> None:
+        drafttek_infos = [
+            ProspectInfo(name=f"Player {i}", position="QB", college="State U", bio_url=f"https://example.com/{i}")
+            for i in range(1, 300)
+        ]
+        with patch("nfl_draft.get_drafttek_2026_prospects", return_value=drafttek_infos):
+            picks = simulate_draft()
+        for pick in picks:
+            self.assertNotEqual("", pick.position)
+            self.assertNotEqual("", pick.college)
+            self.assertTrue(pick.bio_url.startswith("https://"))
+
+    def test_simulate_draft_falls_back_to_remote_csv_when_drafttek_empty(self) -> None:
+        with (
+            patch("nfl_draft.get_drafttek_2026_prospects", return_value=[]),
+            patch("nfl_draft.get_real_2026_prospects", return_value=[f"Remote Player {i}" for i in range(1, 300)]),
+        ):
+            picks = simulate_draft()
+        self.assertEqual(224, len(picks))
+        self.assertTrue(all(pick.player.startswith("Remote Player") for pick in picks))
+
+    def test_simulate_draft_accepts_string_prospects_for_backward_compatibility(self) -> None:
+        string_prospects = [f"Test Player {i:03d}" for i in range(1, 225)]
+        picks = simulate_draft(prospects=string_prospects)
+        self.assertEqual(224, len(picks))
+        pick_names = {pick.player for pick in picks}
+        self.assertTrue(pick_names.issubset(set(string_prospects)))
+
+    def test_simulate_draft_accepts_mixed_prospect_infos(self) -> None:
+        mixed = [
+            ProspectInfo(name="Info Player", position="QB", college="State U"),
+            "String Player",
+        ] * 112
+        picks = simulate_draft(prospects=mixed)
+        self.assertEqual(224, len(picks))
+
+    def test_get_drafttek_2026_prospects_returns_cached_result(self) -> None:
+        get_drafttek_2026_prospects.cache_clear()
+        with patch("nfl_draft._load_drafttek_prospects") as mock_load:
+            mock_load.return_value = [ProspectInfo(name="Cached Player")]
+            result1 = get_drafttek_2026_prospects()
+            result2 = get_drafttek_2026_prospects()
+        self.assertEqual(1, mock_load.call_count)
+        self.assertEqual(result1, result2)
+        get_drafttek_2026_prospects.cache_clear()
 
 
 if __name__ == "__main__":
