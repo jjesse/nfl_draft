@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NFL Draft Simulator (2026)</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="container">
+    <h1>2026 NFL Draft Simulator</h1>
+    <p class="subtitle">Static GitHub Pages view of a 7-round draft board.</p>
+
+    <nav class="tabs" aria-label="Draft views">
+      <button id="round-tab" class="tab active" type="button">Round by round</button>
+      <button id="team-tab" class="tab" type="button">Team by team</button>
+    </nav>
+
+    <section id="round-view" class="view">
+      <label for="round-select">Round</label>
+      <select id="round-select"></select>
+      <div id="round-results"></div>
+    </section>
+
+    <section id="team-view" class="view hidden">
+      <label for="team-select">Team</label>
+      <select id="team-select"></select>
+      <div id="team-results"></div>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>
