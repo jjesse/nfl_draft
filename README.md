@@ -82,6 +82,27 @@ To publish on GitHub Pages for this repository:
 
 To include it from `jjesse.github.io`, link to the published `nfl_draft` page.
 
+## Draft pick order
+
+The simulator always uses the correct team ordering for every pick, including
+traded picks.  The pick order is resolved through the following fallback chain:
+
+1. **nflverse data release** – `get_draft_order(year)` fetches the completed
+   draft order from the [nflverse-data draft_picks release]
+   (https://github.com/nflverse/nflverse-data/releases/tag/draft_picks).
+   This CSV is updated after each draft concludes and uses the same team
+   abbreviations as the rest of the codebase.
+2. **Hardcoded 2026 order** – When nflverse data is not yet available (i.e.,
+   the draft has not concluded), a built-in 2026 order is used:
+   - **Round 1 picks 1–24** are the officially announced order (including all
+     traded picks such as "Los Angeles Rams from Atlanta Falcons via trade").
+   - **Round 1 picks 25–32** are estimated from 2025 season standings.
+   - **Rounds 2–7** use an approximate inverse-standings order for all 32 teams
+     (including teams that traded away their Round 1 pick).
+
+The `source` field in `docs/draft_data.json` (and the `# Source:` header in
+CLI output) tells you which data was used.
+
 ## Drafttek prospect data
 
 The simulator uses the Drafttek 2026 top-600 big board as the primary player
