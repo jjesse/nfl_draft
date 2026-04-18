@@ -66,6 +66,7 @@ DEFAULT_PROSPECT_SOURCE_URL = (
     "7d86e94057b0f1b200791d4f40b898575efe7f0f/"
     "data/processed/2026/teams__player_trends.csv"
 )
+DEFAULT_PROSPECT_SOURCE_TIMEOUT_SECONDS = 5.0
 
 
 def _load_prospects_from_csv_text(csv_text: str) -> List[str]:
@@ -74,13 +75,9 @@ def _load_prospects_from_csv_text(csv_text: str) -> List[str]:
     return prospects
 
 
-@lru_cache(maxsize=1)
-def get_real_2026_prospects(
-    source_url: str = DEFAULT_PROSPECT_SOURCE_URL,
-    timeout_seconds: float = 5.0,
-) -> List[str]:
+def _fetch_real_2026_prospects() -> List[str]:
     try:
-        with urlopen(source_url, timeout=timeout_seconds) as response:
+        with urlopen(DEFAULT_PROSPECT_SOURCE_URL, timeout=DEFAULT_PROSPECT_SOURCE_TIMEOUT_SECONDS) as response:
             csv_text = response.read().decode("utf-8")
         prospects = _load_prospects_from_csv_text(csv_text)
         if prospects:
@@ -88,6 +85,11 @@ def get_real_2026_prospects(
     except (OSError, URLError, ValueError):
         pass
     return []
+
+
+@lru_cache(maxsize=1)
+def get_real_2026_prospects() -> List[str]:
+    return _fetch_real_2026_prospects()
 
 
 def simulate_draft(
