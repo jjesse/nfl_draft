@@ -80,7 +80,7 @@ class TeamAbbreviationTests(unittest.TestCase):
             self.assertIn(full_name, NFL_TEAMS, msg=f"Full name for {abbr!r} not in NFL_TEAMS")
 
 
-class ImportActualDraftPicksTests(unittest.TestCase):
+class FetchActualDraftPicksTests(unittest.TestCase):
     def test_returns_empty_list_when_nfl_data_py_not_installed(self) -> None:
         import builtins
         real_import = builtins.__import__
@@ -168,6 +168,8 @@ class ImportActualDraftPicksTests(unittest.TestCase):
 
         self.assertEqual("Player 5", result[0].player)
 
+
+class ImportActualDraftPicksTests(unittest.TestCase):
     def test_import_actual_draft_picks_is_cached(self) -> None:
         import pandas as pd
 

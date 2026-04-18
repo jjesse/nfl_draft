@@ -156,21 +156,21 @@ def _fetch_actual_draft_picks(year: int) -> List[DraftPick]:
     picks: List[DraftPick] = []
     # Compute the pick number within each round from the global pick order.
     round_pick_counter: dict[int, int] = {}
-    for _, row in df.sort_values("pick").iterrows():
-        round_number = int(row["round"])
+    for row in df.sort_values("pick").itertuples(index=False):
+        round_number = int(row.round)
         round_pick_counter[round_number] = round_pick_counter.get(round_number, 0) + 1
 
-        team_abbr = str(row.get("team", ""))
+        team_abbr = str(getattr(row, "team", ""))
         team_name = NFL_TEAM_ABBREVIATIONS.get(team_abbr, team_abbr)
 
-        player_name = str(row.get("pfr_player_name", "")).strip()
+        player_name = str(getattr(row, "pfr_player_name", "")).strip()
         if not player_name:
-            player_name = f"Player {int(row['pick'])}"
+            player_name = f"Player {int(row.pick)}"
 
         picks.append(
             DraftPick(
-                year=int(row["season"]),
-                overall_pick=int(row["pick"]),
+                year=int(row.season),
+                overall_pick=int(row.pick),
                 round_number=round_number,
                 round_pick=round_pick_counter[round_number],
                 team=team_name,
