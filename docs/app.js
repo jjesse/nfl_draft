@@ -95,6 +95,15 @@ function simulateDraftLocally() {
 // UI rendering
 // ---------------------------------------------------------------------------
 
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function renderTable(container, headers, rows) {
   const thead = `<thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead>`;
   const tbody = `<tbody>${rows
@@ -134,10 +143,10 @@ function initUI(picks, source, generatedAt) {
   });
 
   function playerCell(pick) {
-    const name = pick.player || "";
+    const name = escapeHtml(pick.player || "");
     const url = pick.bio_url || "";
     return url
-      ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${name}</a>`
+      ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${name}</a>`
       : name;
   }
 

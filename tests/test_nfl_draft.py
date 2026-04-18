@@ -232,7 +232,7 @@ class DrafttekProspectLoaderTests(unittest.TestCase):
         self.assertEqual("", prospects[0].bio_url)
 
     def test_simulate_draft_uses_drafttek_prospects_as_primary_fallback(self) -> None:
-        drafttek_infos = [ProspectInfo(name=f"DT Player {i}", position="WR", college="State U") for i in range(1, 300)]
+        drafttek_infos = [ProspectInfo(name=f"Prospect {i}", position="WR", college="State U") for i in range(1, 300)]
         with patch("nfl_draft.get_drafttek_2026_prospects", return_value=drafttek_infos):
             picks = simulate_draft()
         self.assertEqual(224, len(picks))

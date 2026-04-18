@@ -114,6 +114,8 @@ python scrape_draftek_bio.py
 After running the scraper, commit the updated CSV/JSON files and run
 `python generate_data.py` to regenerate `docs/draft_data.json`.
 
+## Run tests
+
 ```bash
 python -m unittest discover -s tests -v
 ```
