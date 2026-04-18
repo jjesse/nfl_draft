@@ -37,6 +37,10 @@ const YEAR = 2026;
 const ROUNDS = 7;
 const RANDOM_SEED = 2026;
 
+// ---------------------------------------------------------------------------
+// Browser-side fallback simulation (used only when draft_data.json is unavailable)
+// ---------------------------------------------------------------------------
+
 function mulberry32(seed) {
   let a = seed >>> 0;
   return function random() {
@@ -65,7 +69,7 @@ function defaultProspects(totalPlayers) {
   );
 }
 
-function simulateDraft() {
+function simulateDraftLocally() {
   const totalPicks = NFL_TEAMS.length * ROUNDS;
   const randomizedProspects = shuffleWithSeed(defaultProspects(totalPicks), RANDOM_SEED);
   const picks = [];
@@ -74,10 +78,9 @@ function simulateDraft() {
   for (let roundNumber = 1; roundNumber <= ROUNDS; roundNumber += 1) {
     NFL_TEAMS.forEach((team, index) => {
       picks.push({
-        year: YEAR,
-        overallPick,
-        roundNumber,
-        roundPick: index + 1,
+        overall_pick: overallPick,
+        round_number: roundNumber,
+        round_pick: index + 1,
         team,
         player: randomizedProspects[overallPick - 1],
       });
@@ -85,8 +88,12 @@ function simulateDraft() {
     });
   }
 
-  return picks;
+  return { picks, source: "browser-simulation (fallback)" };
 }
+
+// ---------------------------------------------------------------------------
+// UI rendering
+// ---------------------------------------------------------------------------
 
 function renderTable(container, headers, rows) {
   const thead = `<thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead>`;
@@ -96,8 +103,17 @@ function renderTable(container, headers, rows) {
   container.innerHTML = `<table>${thead}${tbody}</table>`;
 }
 
-function init() {
-  const picks = simulateDraft();
+function setSourceBanner(source, generatedAt) {
+  const banner = document.getElementById("source-banner");
+  if (!banner) return;
+  const label = source === "nfl_data_py" ? "Real picks (nfl_data_py)" : `Simulated draft (${source})`;
+  const dateStr = generatedAt ? ` · updated ${new Date(generatedAt).toLocaleString()}` : "";
+  banner.textContent = `Data source: ${label}${dateStr}`;
+  banner.classList.remove("hidden");
+}
+
+function initUI(picks, source, generatedAt) {
+  setSourceBanner(source, generatedAt);
 
   const roundSelect = document.getElementById("round-select");
   const teamSelect = document.getElementById("team-select");
@@ -119,15 +135,15 @@ function init() {
 
   function showRound(roundNumber) {
     const rows = picks
-      .filter((pick) => pick.roundNumber === Number(roundNumber))
-      .map((pick) => [pick.overallPick, `Round ${pick.roundNumber} Pick ${pick.roundPick}`, pick.team, pick.player]);
+      .filter((pick) => pick.round_number === Number(roundNumber))
+      .map((pick) => [pick.overall_pick, `Round ${pick.round_number} Pick ${pick.round_pick}`, pick.team, pick.player]);
     renderTable(roundResults, ["Overall", "Slot", "Team", "Player"], rows);
   }
 
   function showTeam(team) {
     const rows = picks
       .filter((pick) => pick.team === team)
-      .map((pick) => [pick.overallPick, `Round ${pick.roundNumber} Pick ${pick.roundPick}`, pick.player]);
+      .map((pick) => [pick.overall_pick, `Round ${pick.round_number} Pick ${pick.round_pick}`, pick.player]);
     renderTable(teamResults, ["Overall", "Pick", "Player"], rows);
   }
 
@@ -150,6 +166,32 @@ function init() {
 
   showRound(1);
   showTeam(NFL_TEAMS[0]);
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap: fetch JSON data, fall back to browser simulation on error
+// ---------------------------------------------------------------------------
+
+async function init() {
+  let picks;
+  let source;
+  let generatedAt;
+
+  try {
+    const response = await fetch("./draft_data.json");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    picks = data.picks;
+    source = data.source;
+    generatedAt = data.generated_at;
+  } catch (_err) {
+    const fallback = simulateDraftLocally();
+    picks = fallback.picks;
+    source = fallback.source;
+    generatedAt = null;
+  }
+
+  initUI(picks, source, generatedAt);
 }
 
 init();
