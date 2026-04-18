@@ -10,7 +10,7 @@ import json
 import pathlib
 from datetime import datetime, timezone
 
-from nfl_draft import import_actual_draft_picks, simulate_draft
+from nfl_draft import import_actual_draft_picks, get_draft_order, simulate_draft, _fetch_draft_order_from_nflverse
 
 DOCS_DIR = pathlib.Path(__file__).parent / "docs"
 
@@ -21,8 +21,17 @@ def build_data() -> dict:
         picks = actual_picks
         source = "nfl_data_py"
     else:
-        picks = simulate_draft()
-        source = "simulation"
+        draft_order = get_draft_order(2026)
+        picks = simulate_draft(pick_sequence=draft_order or None)
+        if draft_order:
+            remote = _fetch_draft_order_from_nflverse(2026)
+            source = (
+                "simulation with nflverse draft order"
+                if remote
+                else "simulation with hardcoded 2026 draft order (picks 1–24 official, rest estimated)"
+            )
+        else:
+            source = "simulation"
 
     return {
         "source": source,

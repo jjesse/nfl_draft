@@ -1,3 +1,5 @@
+import csv
+import io
 import unittest
 from collections import Counter
 from unittest.mock import MagicMock, Mock, patch
@@ -5,10 +7,15 @@ from unittest.mock import MagicMock, Mock, patch
 from nfl_draft import (
     NFL_TEAM_ABBREVIATIONS,
     ProspectInfo,
+    _DRAFT_ORDER_2026_ROUND_1,
+    _DRAFT_ORDER_2026_ROUNDS_2_TO_7,
     _fetch_actual_draft_picks,
+    _fetch_draft_order_from_nflverse,
     _fetch_real_2026_prospects,
+    _hardcoded_draft_order_2026,
     _load_drafttek_prospects_from_csv_text,
     _load_prospects_from_csv_text,
+    get_draft_order,
     get_drafttek_2026_prospects,
     get_team_picks,
     import_actual_draft_picks,
@@ -286,6 +293,221 @@ class DrafttekProspectLoaderTests(unittest.TestCase):
         self.assertEqual(1, mock_load.call_count)
         self.assertEqual(result1, result2)
         get_drafttek_2026_prospects.cache_clear()
+
+
+class DraftOrderDataTests(unittest.TestCase):
+    """Tests for the hardcoded 2026 draft order constants."""
+
+    def test_round_1_has_32_picks(self) -> None:
+        self.assertEqual(32, len(_DRAFT_ORDER_2026_ROUND_1))
+
+    def test_round_1_first_24_picks_match_announced_order(self) -> None:
+        expected_first_24 = [
+            "Las Vegas Raiders",
+            "New York Jets",
+            "Arizona Cardinals",
+            "Tennessee Titans",
+            "New York Giants",
+            "Cleveland Browns",
+            "Washington Commanders",
+            "New Orleans Saints",
+            "Kansas City Chiefs",
+            "Cincinnati Bengals",
+            "Miami Dolphins",
+            "Dallas Cowboys",
+            "Los Angeles Rams",
+            "Baltimore Ravens",
+            "Tampa Bay Buccaneers",
+            "New York Jets",
+            "Detroit Lions",
+            "Minnesota Vikings",
+            "Carolina Panthers",
+            "Dallas Cowboys",
+            "Pittsburgh Steelers",
+            "Los Angeles Chargers",
+            "Philadelphia Eagles",
+            "Cleveland Browns",
+        ]
+        self.assertEqual(expected_first_24, _DRAFT_ORDER_2026_ROUND_1[:24])
+
+    def test_rounds_2_to_7_has_32_teams(self) -> None:
+        self.assertEqual(32, len(_DRAFT_ORDER_2026_ROUNDS_2_TO_7))
+
+    def test_rounds_2_to_7_all_unique(self) -> None:
+        self.assertEqual(32, len(set(_DRAFT_ORDER_2026_ROUNDS_2_TO_7)))
+
+    def test_hardcoded_order_has_correct_total_picks(self) -> None:
+        order = _hardcoded_draft_order_2026()
+        # 32 picks in round 1 + 32 picks × 6 rounds = 224 total
+        self.assertEqual(32 + 32 * 6, len(order))
+
+    def test_hardcoded_order_round_numbers(self) -> None:
+        order = _hardcoded_draft_order_2026()
+        rounds = {round_num for round_num, _ in order}
+        self.assertEqual(set(range(1, 8)), rounds)
+
+    def test_hardcoded_order_round_1_teams_match_constant(self) -> None:
+        order = _hardcoded_draft_order_2026()
+        r1_teams = [team for round_num, team in order if round_num == 1]
+        self.assertEqual(_DRAFT_ORDER_2026_ROUND_1, r1_teams)
+
+
+class FetchDraftOrderTests(unittest.TestCase):
+    """Tests for _fetch_draft_order_from_nflverse and get_draft_order."""
+
+    def _make_csv_bytes(self, rows: list[dict]) -> bytes:
+        buf = io.StringIO()
+        if rows:
+            writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+        return buf.getvalue().encode("utf-8")
+
+    @patch("nfl_draft.urlopen")
+    def test_returns_empty_list_on_network_error(self, mock_urlopen: Mock) -> None:
+        from urllib.error import URLError
+        mock_urlopen.side_effect = URLError("timeout")
+        result = _fetch_draft_order_from_nflverse(2026)
+        self.assertEqual([], result)
+
+    @patch("nfl_draft.urlopen")
+    def test_returns_empty_list_when_year_not_in_csv(self, mock_urlopen: Mock) -> None:
+        csv_bytes = self._make_csv_bytes([
+            {"season": "2025", "round": "1", "pick": "1", "team": "TEN", "pfr_player_name": "Cam Ward"},
+        ])
+        mock_response = Mock()
+        mock_response.read.return_value = csv_bytes
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+        result = _fetch_draft_order_from_nflverse(2026)
+        self.assertEqual([], result)
+
+    @patch("nfl_draft.urlopen")
+    def test_parses_round_and_team_correctly(self, mock_urlopen: Mock) -> None:
+        csv_bytes = self._make_csv_bytes([
+            {"season": "2026", "round": "1", "pick": "1", "team": "LVR", "pfr_player_name": ""},
+            {"season": "2026", "round": "1", "pick": "2", "team": "NYJ", "pfr_player_name": ""},
+            {"season": "2026", "round": "2", "pick": "33", "team": "LVR", "pfr_player_name": ""},
+        ])
+        mock_response = Mock()
+        mock_response.read.return_value = csv_bytes
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+        result = _fetch_draft_order_from_nflverse(2026)
+        self.assertEqual(3, len(result))
+        self.assertEqual((1, "Las Vegas Raiders"), result[0])
+        self.assertEqual((1, "New York Jets"), result[1])
+        self.assertEqual((2, "Las Vegas Raiders"), result[2])
+
+    @patch("nfl_draft.urlopen")
+    def test_unknown_abbreviation_kept_as_is(self, mock_urlopen: Mock) -> None:
+        csv_bytes = self._make_csv_bytes([
+            {"season": "2026", "round": "1", "pick": "1", "team": "XYZ", "pfr_player_name": ""},
+        ])
+        mock_response = Mock()
+        mock_response.read.return_value = csv_bytes
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+        result = _fetch_draft_order_from_nflverse(2026)
+        self.assertEqual(1, len(result))
+        self.assertEqual("XYZ", result[0][1])
+
+    def test_get_draft_order_falls_back_to_hardcoded_for_2026(self) -> None:
+        get_draft_order.cache_clear()
+        with patch("nfl_draft._fetch_draft_order_from_nflverse", return_value=[]):
+            result = get_draft_order(2026)
+        self.assertEqual(_hardcoded_draft_order_2026(), result)
+        get_draft_order.cache_clear()
+
+    @patch("nfl_draft._fetch_draft_order_from_nflverse")
+    def test_get_draft_order_returns_remote_when_available(self, mock_fetch: Mock) -> None:
+        get_draft_order.cache_clear()
+        remote = [(1, "Las Vegas Raiders"), (1, "New York Jets")]
+        mock_fetch.return_value = remote
+        result = get_draft_order(2026)
+        self.assertEqual(remote, result)
+        get_draft_order.cache_clear()
+
+    def test_get_draft_order_returns_empty_for_unknown_year_when_fetch_fails(self) -> None:
+        get_draft_order.cache_clear()
+        with patch("nfl_draft._fetch_draft_order_from_nflverse", return_value=[]):
+            result = get_draft_order(1999)
+        self.assertEqual([], result)
+        get_draft_order.cache_clear()
+
+
+class SimulateDraftWithPickSequenceTests(unittest.TestCase):
+    """Tests for simulate_draft's pick_sequence parameter."""
+
+    def _small_sequence(self) -> list[tuple[int, str]]:
+        """A minimal two-round, two-team pick sequence for fast tests."""
+        return [
+            (1, "Las Vegas Raiders"),
+            (1, "New York Jets"),
+            (2, "Las Vegas Raiders"),
+            (2, "New York Jets"),
+        ]
+
+    def test_pick_sequence_overrides_teams_and_rounds(self) -> None:
+        seq = self._small_sequence()
+        picks = simulate_draft(
+            pick_sequence=seq,
+            prospects=["Player A", "Player B", "Player C", "Player D"],
+        )
+        self.assertEqual(4, len(picks))
+        self.assertEqual("Las Vegas Raiders", picks[0].team)
+        self.assertEqual("New York Jets", picks[1].team)
+        self.assertEqual(1, picks[0].round_number)
+        self.assertEqual(2, picks[2].round_number)
+
+    def test_overall_pick_numbers_are_sequential(self) -> None:
+        seq = self._small_sequence()
+        picks = simulate_draft(
+            pick_sequence=seq,
+            prospects=["A", "B", "C", "D"],
+        )
+        self.assertEqual([1, 2, 3, 4], [p.overall_pick for p in picks])
+
+    def test_round_pick_resets_each_round(self) -> None:
+        seq = self._small_sequence()
+        picks = simulate_draft(
+            pick_sequence=seq,
+            prospects=["A", "B", "C", "D"],
+        )
+        self.assertEqual(1, picks[0].round_pick)
+        self.assertEqual(2, picks[1].round_pick)
+        self.assertEqual(1, picks[2].round_pick)  # resets for round 2
+        self.assertEqual(2, picks[3].round_pick)
+
+    def test_team_with_two_picks_appears_twice(self) -> None:
+        seq = [
+            (1, "Las Vegas Raiders"),
+            (1, "New York Jets"),
+            (1, "Las Vegas Raiders"),  # trade pick
+        ]
+        picks = simulate_draft(
+            pick_sequence=seq,
+            prospects=["A", "B", "C"],
+        )
+        raiders_picks = [p for p in picks if p.team == "Las Vegas Raiders"]
+        self.assertEqual(2, len(raiders_picks))
+
+    def test_pick_sequence_none_preserves_legacy_behaviour(self) -> None:
+        picks = simulate_draft(
+            teams=["Team Alpha", "Team Beta"],
+            rounds=2,
+            prospects=["A", "B", "C", "D"],
+        )
+        self.assertEqual(4, len(picks))
+        self.assertEqual("Team Alpha", picks[0].team)
+        self.assertEqual("Team Beta", picks[1].team)
+
+    def test_hardcoded_order_produces_correct_round_1_teams(self) -> None:
+        order = _hardcoded_draft_order_2026()
+        prospect_list = [f"Player {i}" for i in range(1, len(order) + 1)]
+        picks = simulate_draft(pick_sequence=order, prospects=prospect_list)
+        r1_picks = [p for p in picks if p.round_number == 1]
+        self.assertEqual(32, len(r1_picks))
+        self.assertEqual("Las Vegas Raiders", r1_picks[0].team)
+        self.assertEqual("New York Jets", r1_picks[1].team)
+        self.assertEqual("Cleveland Browns", r1_picks[5].team)
 
 
 if __name__ == "__main__":

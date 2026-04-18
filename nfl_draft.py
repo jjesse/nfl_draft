@@ -9,7 +9,7 @@ import pathlib
 from random import Random
 from urllib.error import URLError
 from urllib.request import urlopen
-from typing import Iterable, List, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 
 NFL_TEAMS = [
@@ -117,6 +117,166 @@ DEFAULT_PROSPECT_SOURCE_URL = (
     "data/processed/2026/teams__player_trends.csv"
 )
 DEFAULT_PROSPECT_SOURCE_TIMEOUT_SECONDS = 5.0
+
+# ---------------------------------------------------------------------------
+# Draft-order fetch – nflverse releases CSV (same team abbreviations as
+# NFL_TEAM_ABBREVIATIONS; populated after each draft concludes)
+# ---------------------------------------------------------------------------
+
+NFLVERSE_DRAFT_PICKS_URL = (
+    "https://github.com/nflverse/nflverse-data/releases/download/"
+    "draft_picks/draft_picks.csv"
+)
+NFLVERSE_DRAFT_PICKS_TIMEOUT_SECONDS = 10.0
+
+# Round 1 pick order for the 2026 NFL Draft.
+# Picks 1–24 are the officially announced order; picks 25–32 are estimated
+# from 2025 season standings and available trade information.
+_DRAFT_ORDER_2026_ROUND_1: List[str] = [
+    "Las Vegas Raiders",       # 1
+    "New York Jets",           # 2
+    "Arizona Cardinals",       # 3
+    "Tennessee Titans",        # 4
+    "New York Giants",         # 5
+    "Cleveland Browns",        # 6
+    "Washington Commanders",   # 7
+    "New Orleans Saints",      # 8
+    "Kansas City Chiefs",      # 9
+    "Cincinnati Bengals",      # 10
+    "Miami Dolphins",          # 11
+    "Dallas Cowboys",          # 12
+    "Los Angeles Rams",        # 13 (from Atlanta Falcons via trade)
+    "Baltimore Ravens",        # 14
+    "Tampa Bay Buccaneers",    # 15
+    "New York Jets",           # 16 (from Indianapolis Colts via trade)
+    "Detroit Lions",           # 17
+    "Minnesota Vikings",       # 18
+    "Carolina Panthers",       # 19
+    "Dallas Cowboys",          # 20 (from Green Bay Packers via trade)
+    "Pittsburgh Steelers",     # 21
+    "Los Angeles Chargers",    # 22
+    "Philadelphia Eagles",     # 23
+    "Cleveland Browns",        # 24 (from Jacksonville Jaguars via trade)
+    "New England Patriots",    # 25 (estimated)
+    "Chicago Bears",           # 26 (estimated)
+    "Denver Broncos",          # 27 (estimated)
+    "Houston Texans",          # 28 (estimated)
+    "Los Angeles Rams",        # 29 (estimated – original pick; earlier pick acquired via trade)
+    "San Francisco 49ers",     # 30 (estimated)
+    "Seattle Seahawks",        # 31 (estimated)
+    "Buffalo Bills",           # 32 (estimated)
+]
+
+# Rounds 2–7 base order: all 32 teams in approximate inverse-standings order.
+# Teams that traded away their Round 1 pick still hold later-round picks.
+_DRAFT_ORDER_2026_ROUNDS_2_TO_7: List[str] = [
+    "Las Vegas Raiders",
+    "New York Jets",
+    "Arizona Cardinals",
+    "Tennessee Titans",
+    "New York Giants",
+    "Cleveland Browns",
+    "Jacksonville Jaguars",     # traded Round 1 pick; still holds later picks
+    "Washington Commanders",
+    "New Orleans Saints",
+    "Atlanta Falcons",          # traded Round 1 pick; still holds later picks
+    "Kansas City Chiefs",
+    "Cincinnati Bengals",
+    "Miami Dolphins",
+    "Indianapolis Colts",       # traded Round 1 pick; still holds later picks
+    "Dallas Cowboys",
+    "Los Angeles Rams",
+    "Baltimore Ravens",
+    "Tampa Bay Buccaneers",
+    "Detroit Lions",
+    "Minnesota Vikings",
+    "Carolina Panthers",
+    "Green Bay Packers",        # traded Round 1 pick; still holds later picks
+    "Pittsburgh Steelers",
+    "Los Angeles Chargers",
+    "Philadelphia Eagles",
+    "New England Patriots",
+    "Chicago Bears",
+    "Denver Broncos",
+    "Houston Texans",
+    "San Francisco 49ers",
+    "Seattle Seahawks",
+    "Buffalo Bills",
+]
+
+
+def _hardcoded_draft_order_2026() -> List[Tuple[int, str]]:
+    """Return a best-effort 2026 NFL Draft pick sequence as (round, team) pairs.
+
+    Round 1 picks 1–24 are taken from the officially announced order.
+    Picks 25–32 of Round 1 and all of Rounds 2–7 are estimated from 2025
+    season standings and may not perfectly reflect actual trade activity.
+    """
+    sequence: List[Tuple[int, str]] = []
+    for team in _DRAFT_ORDER_2026_ROUND_1:
+        sequence.append((1, team))
+    for round_number in range(2, 8):
+        for team in _DRAFT_ORDER_2026_ROUNDS_2_TO_7:
+            sequence.append((round_number, team))
+    return sequence
+
+
+def _fetch_draft_order_from_nflverse(year: int) -> List[Tuple[int, str]]:
+    """Fetch the full draft pick order for *year* from the nflverse data release.
+
+    Returns a list of ``(round_number, team_name)`` tuples sorted by overall
+    pick number.  Returns an empty list when the year is not yet available or
+    the fetch fails.
+    """
+    try:
+        with urlopen(NFLVERSE_DRAFT_PICKS_URL, timeout=NFLVERSE_DRAFT_PICKS_TIMEOUT_SECONDS) as response:
+            csv_text = response.read().decode("utf-8")
+    except (OSError, URLError, ValueError):
+        return []
+
+    try:
+        rows = list(csv.DictReader(StringIO(csv_text)))
+    except Exception:
+        return []
+
+    year_str = str(year)
+    year_rows = [row for row in rows if row.get("season") == year_str]
+    if not year_rows:
+        return []
+
+    try:
+        year_rows.sort(key=lambda r: int(r.get("pick", 0)))
+    except (ValueError, TypeError):
+        return []
+
+    sequence: List[Tuple[int, str]] = []
+    for row in year_rows:
+        try:
+            round_number = int(row.get("round", 0))
+        except (ValueError, TypeError):
+            continue
+        team_abbr = str(row.get("team", "")).strip()
+        team_name = NFL_TEAM_ABBREVIATIONS.get(team_abbr, team_abbr)
+        if round_number > 0 and team_name:
+            sequence.append((round_number, team_name))
+    return sequence
+
+
+@lru_cache(maxsize=8)
+def get_draft_order(year: int) -> List[Tuple[int, str]]:
+    """Return the full draft pick order for *year* as ``(round, team)`` pairs.
+
+    Tries the nflverse data release first (accurate post-draft data).  Falls
+    back to a hardcoded 2026 order (Round 1 picks 1–24 are exact; the rest are
+    estimated) when nflverse data is not yet available.  For years other than
+    2026, returns an empty list when the remote fetch fails.
+    """
+    remote = _fetch_draft_order_from_nflverse(year)
+    if remote:
+        return remote
+    if year == 2026:
+        return _hardcoded_draft_order_2026()
+    return []
 
 
 def _load_prospects_from_csv_text(csv_text: str) -> List[str]:
@@ -261,10 +421,19 @@ def simulate_draft(
     year: int = 2026,
     rounds: int = 7,
     teams: Iterable[str] = NFL_TEAMS,
+    pick_sequence: Optional[List[Tuple[int, str]]] = None,
     random_seed: int = 2026,
     prospects: Union[Iterable[Union[str, ProspectInfo]], None] = None,
 ) -> List[DraftPick]:
     """Simulate a draft and return a list of :class:`DraftPick` objects.
+
+    *pick_sequence* is the preferred way to control team order.  It should be a
+    list of ``(round_number, team_name)`` pairs covering every pick in the draft
+    (e.g. from :func:`get_draft_order`).  When provided, *rounds* and *teams*
+    are ignored for ordering purposes.
+
+    When *pick_sequence* is ``None`` the draft is simulated by cycling through
+    *teams* once per round for *rounds* rounds (the legacy behaviour).
 
     *prospects* may contain plain name strings or :class:`ProspectInfo` objects.
     When *prospects* is ``None`` the fallback chain is applied:
@@ -273,13 +442,15 @@ def simulate_draft(
     2. Remote mock-draft CSV (cwecht15/Mock-Draft-Database on GitHub).
     3. Generated placeholder names.
     """
-    team_order = list(teams)
-    if not team_order:
-        raise ValueError("At least one team is required to simulate a draft.")
-    if rounds <= 0:
-        raise ValueError("Rounds must be greater than zero.")
-
-    total_picks = rounds * len(team_order)
+    if pick_sequence is not None:
+        total_picks = len(pick_sequence)
+    else:
+        team_order = list(teams)
+        if not team_order:
+            raise ValueError("At least one team is required to simulate a draft.")
+        if rounds <= 0:
+            raise ValueError("Rounds must be greater than zero.")
+        total_picks = rounds * len(team_order)
 
     # Build a normalized list of ProspectInfo regardless of input type.
     if prospects is not None:
@@ -301,16 +472,17 @@ def simulate_draft(
     Random(random_seed).shuffle(randomized)
 
     picks: List[DraftPick] = []
-    overall_pick = 1
-    for round_number in range(1, rounds + 1):
-        for round_pick, team in enumerate(team_order, start=1):
+    if pick_sequence is not None:
+        picks_per_round: dict[int, int] = {}
+        for overall_pick, (round_number, team) in enumerate(pick_sequence, start=1):
+            picks_per_round[round_number] = picks_per_round.get(round_number, 0) + 1
             info = randomized[overall_pick - 1]
             picks.append(
                 DraftPick(
                     year=year,
                     overall_pick=overall_pick,
                     round_number=round_number,
-                    round_pick=round_pick,
+                    round_pick=picks_per_round[round_number],
                     team=team,
                     player=info.name,
                     position=info.position,
@@ -318,7 +490,25 @@ def simulate_draft(
                     bio_url=info.bio_url,
                 )
             )
-            overall_pick += 1
+    else:
+        overall_pick = 1
+        for round_number in range(1, rounds + 1):
+            for round_pick, team in enumerate(team_order, start=1):
+                info = randomized[overall_pick - 1]
+                picks.append(
+                    DraftPick(
+                        year=year,
+                        overall_pick=overall_pick,
+                        round_number=round_number,
+                        round_pick=round_pick,
+                        team=team,
+                        player=info.name,
+                        position=info.position,
+                        college=info.college,
+                        bio_url=info.bio_url,
+                    )
+                )
+                overall_pick += 1
     return picks
 
 
@@ -347,8 +537,17 @@ def main() -> None:
         picks = actual_picks
         source = "nfl_data_py"
     else:
-        picks = simulate_draft()
-        source = "simulation (nfl_data_py data not yet available)"
+        draft_order = get_draft_order(2026)
+        picks = simulate_draft(pick_sequence=draft_order or None)
+        if draft_order:
+            remote = _fetch_draft_order_from_nflverse(2026)
+            source = (
+                "simulation with nflverse draft order"
+                if remote
+                else "simulation with hardcoded 2026 draft order (picks 1–24 official, rest estimated)"
+            )
+        else:
+            source = "simulation (nfl_data_py data not yet available)"
 
     selected_picks = picks if not args.team else get_team_picks(picks, args.team)
 
