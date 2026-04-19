@@ -44,7 +44,7 @@ python nfl_draft.py --team "Dallas Cowboys"
 ## GitHub Actions – draft data refresh
 
 The `Update Draft Data` workflow (`.github/workflows/update_draft.yml`) refreshes
-`docs/draft_data.json` on each push (including merges) and can also be run
+`docs/draft_data.json` on each push to `main`/`master` (including merges) and can also be run
 manually from **Actions → Update Draft Data → Run workflow**:
 
 1. It installs the Python dependencies from `requirements.txt`.

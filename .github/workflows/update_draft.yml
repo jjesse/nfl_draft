@@ -2,6 +2,9 @@ name: Update Draft Data
 
 on:
   push:
+    branches:
+      - main
+      - master
   workflow_dispatch: # Allow triggering manually from the Actions tab
 
 permissions:
