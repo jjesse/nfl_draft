@@ -10,7 +10,7 @@ import pathlib
 from random import Random
 from urllib.error import URLError
 from urllib.request import urlopen
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 
 NFL_TEAMS = [
@@ -548,30 +548,37 @@ def simulate_draft(
             ProspectInfo(name=p) for p in _default_prospects(total_picks - len(pool))
         ]
 
+    # Build a callable that returns the next prospect for a given picking team.
+    selector: Callable[[str], ProspectInfo]
     if use_team_needs:
         # Need-based mode: keep pool in rank order; select greedily by need.
-        team_needs = load_team_needs()
-        pool = list(pool)  # mutable copy
+        team_needs_map = load_team_needs()
+        mutable_pool = list(pool)
 
-        def _select(team: str) -> ProspectInfo:
-            idx = _pick_by_need(pool, team, team_needs)
-            return pool.pop(idx)
+        class _NeedsSelector:
+            def __call__(self, team: str) -> ProspectInfo:
+                idx = _pick_by_need(mutable_pool, team, team_needs_map)
+                return mutable_pool.pop(idx)
 
+        selector = _NeedsSelector()
     else:
         # Random mode (original behaviour): shuffle then assign by index.
         randomized = list(pool)
         Random(random_seed).shuffle(randomized)
         pick_iter = iter(randomized)
 
-        def _select(team: str) -> ProspectInfo:  # type: ignore[misc]
-            return next(pick_iter)
+        class _RandomSelector:  # type: ignore[no-redef]
+            def __call__(self, team: str) -> ProspectInfo:
+                return next(pick_iter)
+
+        selector = _RandomSelector()
 
     picks: List[DraftPick] = []
     if pick_sequence is not None:
         picks_per_round: dict[int, int] = {}
         for overall_pick, (round_number, team) in enumerate(pick_sequence, start=1):
             picks_per_round[round_number] = picks_per_round.get(round_number, 0) + 1
-            info = _select(team)
+            info = selector(team)
             picks.append(
                 DraftPick(
                     year=year,
@@ -589,7 +596,7 @@ def simulate_draft(
         overall_pick = 1
         for round_number in range(1, rounds + 1):
             for round_pick, team in enumerate(team_order, start=1):
-                info = _select(team)
+                info = selector(team)
                 picks.append(
                     DraftPick(
                         year=year,

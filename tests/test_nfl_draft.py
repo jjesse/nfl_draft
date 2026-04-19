@@ -688,9 +688,9 @@ class NeedBasedSimulationTests(unittest.TestCase):
 
     def test_use_team_needs_false_preserves_random_behaviour(self) -> None:
         # Without team needs, result should match the original random shuffle.
-        prospects = [f"P{i}" for i in range(1, 225)]
-        picks_random = simulate_draft(use_team_needs=False, prospects=prospects, random_seed=42)
-        picks_random2 = simulate_draft(use_team_needs=False, prospects=prospects, random_seed=42)
+        prospect_names = [f"P{i}" for i in range(1, 225)]
+        picks_random = simulate_draft(use_team_needs=False, prospects=prospect_names, random_seed=42)
+        picks_random2 = simulate_draft(use_team_needs=False, prospects=prospect_names, random_seed=42)
         self.assertEqual(
             [p.player for p in picks_random],
             [p.player for p in picks_random2],
