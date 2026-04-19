@@ -6,19 +6,23 @@ from unittest.mock import MagicMock, Mock, patch
 
 from nfl_draft import (
     NFL_TEAM_ABBREVIATIONS,
+    POSITION_GROUPS,
     ProspectInfo,
     _DRAFT_ORDER_2026_ROUND_1,
     _DRAFT_ORDER_2026_ROUNDS_2_TO_7,
+    _canonical_position,
     _fetch_actual_draft_picks,
     _fetch_draft_order_from_nflverse,
     _fetch_real_2026_prospects,
     _hardcoded_draft_order_2026,
     _load_drafttek_prospects_from_csv_text,
     _load_prospects_from_csv_text,
+    _pick_by_need,
     get_draft_order,
     get_drafttek_2026_prospects,
     get_team_picks,
     import_actual_draft_picks,
+    load_team_needs,
     simulate_draft,
 )
 
@@ -508,6 +512,216 @@ class SimulateDraftWithPickSequenceTests(unittest.TestCase):
         self.assertEqual("Las Vegas Raiders", r1_picks[0].team)
         self.assertEqual("New York Jets", r1_picks[1].team)
         self.assertEqual("Cleveland Browns", r1_picks[5].team)
+
+
+class PositionNormalisationTests(unittest.TestCase):
+    """Tests for POSITION_GROUPS and _canonical_position."""
+
+    def test_dl_variants_map_to_dl(self) -> None:
+        for raw in ("DL1T", "DL3T", "DL5T"):
+            self.assertEqual("DL", _canonical_position(raw), msg=f"{raw} should map to DL")
+
+    def test_olb_maps_to_edge(self) -> None:
+        self.assertEqual("EDGE", _canonical_position("OLB"))
+
+    def test_cbn_maps_to_cb(self) -> None:
+        self.assertEqual("CB", _canonical_position("CBN"))
+
+    def test_wrs_maps_to_wr(self) -> None:
+        self.assertEqual("WR", _canonical_position("WRS"))
+
+    def test_unmapped_positions_return_themselves(self) -> None:
+        for pos in ("QB", "RB", "WR", "TE", "OT", "OG", "OC", "EDGE", "CB", "S", "ILB"):
+            self.assertEqual(pos, _canonical_position(pos))
+
+    def test_position_groups_keys_are_strings(self) -> None:
+        self.assertTrue(all(isinstance(k, str) for k in POSITION_GROUPS))
+
+    def test_position_groups_values_are_strings(self) -> None:
+        self.assertTrue(all(isinstance(v, str) for v in POSITION_GROUPS.values()))
+
+
+class LoadTeamNeedsTests(unittest.TestCase):
+    """Tests for load_team_needs."""
+
+    def setUp(self) -> None:
+        load_team_needs.cache_clear()
+
+    def tearDown(self) -> None:
+        load_team_needs.cache_clear()
+
+    def test_returns_dict_with_32_teams(self) -> None:
+        needs = load_team_needs()
+        self.assertEqual(32, len(needs))
+
+    def test_all_teams_have_non_empty_needs(self) -> None:
+        needs = load_team_needs()
+        for team, positions in needs.items():
+            self.assertTrue(positions, msg=f"{team} has an empty needs list")
+
+    def test_needs_values_are_lists_of_strings(self) -> None:
+        needs = load_team_needs()
+        for team, positions in needs.items():
+            for pos in positions:
+                self.assertIsInstance(pos, str, msg=f"{team}: {pos!r} is not a string")
+
+    def test_needs_positions_are_valid_canonical_codes(self) -> None:
+        valid_codes = {
+            "QB", "RB", "WR", "TE", "OT", "OG", "OC", "FB",
+            "EDGE", "DL", "ILB", "CB", "S",
+            "P", "PK", "LS",
+        }
+        needs = load_team_needs()
+        for team, positions in needs.items():
+            for pos in positions:
+                self.assertIn(pos, valid_codes, msg=f"{team} has unrecognised need code {pos!r}")
+
+    def test_returns_empty_dict_on_missing_file(self) -> None:
+        import pathlib
+        with patch("nfl_draft.TEAM_NEEDS_PATH", pathlib.Path("/nonexistent/team_needs.json")):
+            load_team_needs.cache_clear()
+            result = load_team_needs()
+        self.assertEqual({}, result)
+
+    def test_returns_empty_dict_on_malformed_json(self) -> None:
+        with patch("nfl_draft.TEAM_NEEDS_PATH") as mock_path:
+            mock_path.read_text.return_value = "not valid json {"
+            load_team_needs.cache_clear()
+            result = load_team_needs()
+        self.assertEqual({}, result)
+
+
+class PickByNeedTests(unittest.TestCase):
+    """Tests for the _pick_by_need helper."""
+
+    def _make_pool(self, positions: list[str]) -> list[ProspectInfo]:
+        return [
+            ProspectInfo(name=f"Player {i + 1}", position=pos)
+            for i, pos in enumerate(positions)
+        ]
+
+    def test_selects_first_matching_position_for_top_need(self) -> None:
+        pool = self._make_pool(["OT", "QB", "CB"])
+        team_needs = {"Team A": ["QB", "OT"]}
+        idx = _pick_by_need(pool, "Team A", team_needs)
+        self.assertEqual(1, idx)  # "Player 2" at index 1 is QB
+
+    def test_falls_back_to_second_need_when_top_need_unavailable(self) -> None:
+        pool = self._make_pool(["OT", "WR", "CB"])
+        team_needs = {"Team A": ["QB", "OT"]}
+        idx = _pick_by_need(pool, "Team A", team_needs)
+        self.assertEqual(0, idx)  # "Player 1" at index 0 is OT (second need)
+
+    def test_bpa_fallback_when_no_need_is_matched(self) -> None:
+        pool = self._make_pool(["RB", "TE", "FB"])
+        team_needs = {"Team A": ["QB", "EDGE"]}
+        idx = _pick_by_need(pool, "Team A", team_needs)
+        self.assertEqual(0, idx)  # BPA: highest-ranked prospect
+
+    def test_unknown_team_returns_bpa(self) -> None:
+        pool = self._make_pool(["WR", "QB"])
+        idx = _pick_by_need(pool, "Unknown Team", {"Other Team": ["QB"]})
+        self.assertEqual(0, idx)
+
+    def test_canonical_position_used_for_matching(self) -> None:
+        # OLB in pool → canonicalises to EDGE; team needs EDGE
+        pool = self._make_pool(["RB", "OLB"])
+        team_needs = {"Team A": ["EDGE"]}
+        idx = _pick_by_need(pool, "Team A", team_needs)
+        self.assertEqual(1, idx)
+
+    def test_selects_highest_ranked_when_multiple_match(self) -> None:
+        pool = self._make_pool(["WR", "CB", "WR"])
+        team_needs = {"Team A": ["WR"]}
+        idx = _pick_by_need(pool, "Team A", team_needs)
+        self.assertEqual(0, idx)  # first WR in pool has higher rank
+
+
+class NeedBasedSimulationTests(unittest.TestCase):
+    """Integration tests for simulate_draft(use_team_needs=True)."""
+
+    def _make_prospects(self, positions: list[str]) -> list[ProspectInfo]:
+        return [
+            ProspectInfo(name=f"Prospect {i + 1}", position=pos)
+            for i, pos in enumerate(positions)
+        ]
+
+    def test_team_gets_player_matching_top_need(self) -> None:
+        # Pool has OT first, QB second; Raiders' top need is QB.
+        # Use 4 rounds so all 4 prospects enter the pool.
+        prospects = self._make_prospects(["OT", "QB", "EDGE", "CB"])
+        team_needs = {"Las Vegas Raiders": ["QB", "OT"]}
+        with patch("nfl_draft.load_team_needs", return_value=team_needs):
+            picks = simulate_draft(
+                use_team_needs=True,
+                teams=["Las Vegas Raiders"],
+                rounds=4,
+                prospects=prospects,
+            )
+        self.assertEqual("QB", picks[0].position)
+
+    def test_falls_back_to_next_need_when_top_position_exhausted(self) -> None:
+        # Team needs QB first but no QB in pool; should pick OT.
+        prospects = self._make_prospects(["OT", "WR", "CB"])
+        team_needs = {"Las Vegas Raiders": ["QB", "OT"]}
+        with patch("nfl_draft.load_team_needs", return_value=team_needs):
+            picks = simulate_draft(
+                use_team_needs=True,
+                teams=["Las Vegas Raiders"],
+                rounds=1,
+                prospects=prospects,
+            )
+        self.assertEqual("OT", picks[0].position)
+
+    def test_bpa_when_no_need_matched(self) -> None:
+        prospects = self._make_prospects(["RB", "TE", "FB"])
+        team_needs = {"Las Vegas Raiders": ["QB", "EDGE"]}
+        with patch("nfl_draft.load_team_needs", return_value=team_needs):
+            picks = simulate_draft(
+                use_team_needs=True,
+                teams=["Las Vegas Raiders"],
+                rounds=1,
+                prospects=prospects,
+            )
+        # BPA: first-ranked prospect (RB)
+        self.assertEqual("RB", picks[0].position)
+
+    def test_use_team_needs_false_preserves_random_behaviour(self) -> None:
+        # Without team needs, result should match the original random shuffle.
+        prospects = [f"P{i}" for i in range(1, 225)]
+        picks_random = simulate_draft(use_team_needs=False, prospects=prospects, random_seed=42)
+        picks_random2 = simulate_draft(use_team_needs=False, prospects=prospects, random_seed=42)
+        self.assertEqual(
+            [p.player for p in picks_random],
+            [p.player for p in picks_random2],
+        )
+
+    def test_each_player_selected_exactly_once(self) -> None:
+        prospects = self._make_prospects(["QB", "OT", "EDGE", "CB", "WR", "S"] * 40)
+        team_needs = {
+            "Las Vegas Raiders": ["QB"],
+            "New York Jets": ["OT"],
+        }
+        with patch("nfl_draft.load_team_needs", return_value=team_needs):
+            picks = simulate_draft(
+                use_team_needs=True,
+                teams=["Las Vegas Raiders", "New York Jets"],
+                rounds=2,
+                prospects=prospects,
+            )
+        player_names = [p.player for p in picks]
+        self.assertEqual(len(player_names), len(set(player_names)))
+
+    def test_produces_correct_number_of_picks_with_sequence(self) -> None:
+        sequence = [(1, "Las Vegas Raiders"), (1, "New York Jets")]
+        prospects = self._make_prospects(["QB", "OT"])
+        with patch("nfl_draft.load_team_needs", return_value={}):
+            picks = simulate_draft(
+                use_team_needs=True,
+                pick_sequence=sequence,
+                prospects=prospects,
+            )
+        self.assertEqual(2, len(picks))
 
 
 if __name__ == "__main__":

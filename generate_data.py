@@ -6,6 +6,7 @@ JSON data file consumed by the static web UI in /docs.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import pathlib
 from datetime import datetime, timezone
@@ -15,26 +16,29 @@ from nfl_draft import import_actual_draft_picks, get_draft_order, simulate_draft
 DOCS_DIR = pathlib.Path(__file__).parent / "docs"
 
 
-def build_data() -> dict:
+def build_data(*, use_team_needs: bool = False) -> dict:
     actual_picks = import_actual_draft_picks(2026)
     if actual_picks:
         picks = actual_picks
         source = "nfl_data_py"
+        mode = "actual"
     else:
         draft_order = get_draft_order(2026)
-        picks = simulate_draft(pick_sequence=draft_order or None)
+        picks = simulate_draft(pick_sequence=draft_order or None, use_team_needs=use_team_needs)
+        mode = "needs-based" if use_team_needs else "random"
         if draft_order:
             remote = _fetch_draft_order_from_nflverse(2026)
             source = (
-                "simulation with nflverse draft order"
+                f"simulation ({mode}) with nflverse draft order"
                 if remote
-                else "simulation with hardcoded 2026 draft order (picks 1–24 official, rest estimated)"
+                else f"simulation ({mode}) with hardcoded 2026 draft order (picks 1–24 official, rest estimated)"
             )
         else:
-            source = "simulation"
+            source = f"simulation ({mode})"
 
     return {
         "source": source,
+        "mode": mode,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "picks": [
             {
@@ -53,7 +57,16 @@ def build_data() -> dict:
 
 
 def main() -> None:
-    data = build_data()
+    parser = argparse.ArgumentParser(description="Generate docs/draft_data.json for GitHub Pages.")
+    parser.add_argument(
+        "--needs",
+        action="store_true",
+        default=False,
+        help="Use need-based player selection instead of random assignment.",
+    )
+    args = parser.parse_args()
+
+    data = build_data(use_team_needs=args.needs)
     output_path = DOCS_DIR / "draft_data.json"
     output_path.write_text(json.dumps(data, indent=2) + "\n")
     pick_count = len(data["picks"])
