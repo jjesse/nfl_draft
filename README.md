@@ -21,6 +21,9 @@ Install Python dependencies:
 pip install -r requirements.txt
 ```
 
+Use Python 3.11 for dependency compatibility (`nfl-data-py` currently resolves to
+`pandas<2`, which is not installable on Python 3.12 in this workflow).
+
 ## Python CLI usage
 
 ### Run a full 7-round draft (real picks when available, simulation otherwise)
