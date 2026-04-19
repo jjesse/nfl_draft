@@ -1,9 +1,7 @@
 name: Update Draft Data
 
 on:
-  schedule:
-    # Run daily at noon UTC so the page stays fresh after the draft
-    - cron: "0 12 * * *"
+  push:
   workflow_dispatch: # Allow triggering manually from the Actions tab
 
 permissions:
