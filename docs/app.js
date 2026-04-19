@@ -211,8 +211,9 @@ function initUI(picks, source, generatedAt) {
         pick.college || "",
       ]);
     const teamMeta = TEAM_METADATA[team];
-    const firstPick = teamPicks.length > 0 ? teamPicks[0].overall_pick : "—";
-    const lastPick = teamPicks.length > 0 ? teamPicks[teamPicks.length - 1].overall_pick : "—";
+    const pickNumbers = teamPicks.map((pick) => Number(pick.overall_pick)).filter((pickNo) => Number.isFinite(pickNo));
+    const firstPick = pickNumbers.length > 0 ? Math.min(...pickNumbers) : "—";
+    const lastPick = pickNumbers.length > 0 ? Math.max(...pickNumbers) : "—";
     const logoUrl = teamMeta ? `https://a.espncdn.com/i/teamlogos/nfl/500/${teamMeta.abbr}.png` : "";
     const conferenceAndDivision = teamMeta ? `${teamMeta.conference} ${teamMeta.division}` : "NFL";
 
