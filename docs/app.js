@@ -33,6 +33,41 @@ const NFL_TEAMS = [
   "Washington Commanders",
 ];
 
+const TEAM_METADATA = {
+  "Arizona Cardinals": { abbr: "ari", conference: "NFC", division: "West" },
+  "Atlanta Falcons": { abbr: "atl", conference: "NFC", division: "South" },
+  "Baltimore Ravens": { abbr: "bal", conference: "AFC", division: "North" },
+  "Buffalo Bills": { abbr: "buf", conference: "AFC", division: "East" },
+  "Carolina Panthers": { abbr: "car", conference: "NFC", division: "South" },
+  "Chicago Bears": { abbr: "chi", conference: "NFC", division: "North" },
+  "Cincinnati Bengals": { abbr: "cin", conference: "AFC", division: "North" },
+  "Cleveland Browns": { abbr: "cle", conference: "AFC", division: "North" },
+  "Dallas Cowboys": { abbr: "dal", conference: "NFC", division: "East" },
+  "Denver Broncos": { abbr: "den", conference: "AFC", division: "West" },
+  "Detroit Lions": { abbr: "det", conference: "NFC", division: "North" },
+  "Green Bay Packers": { abbr: "gb", conference: "NFC", division: "North" },
+  "Houston Texans": { abbr: "hou", conference: "AFC", division: "South" },
+  "Indianapolis Colts": { abbr: "ind", conference: "AFC", division: "South" },
+  "Jacksonville Jaguars": { abbr: "jax", conference: "AFC", division: "South" },
+  "Kansas City Chiefs": { abbr: "kc", conference: "AFC", division: "West" },
+  "Las Vegas Raiders": { abbr: "lv", conference: "AFC", division: "West" },
+  "Los Angeles Chargers": { abbr: "lac", conference: "AFC", division: "West" },
+  "Los Angeles Rams": { abbr: "lar", conference: "NFC", division: "West" },
+  "Miami Dolphins": { abbr: "mia", conference: "AFC", division: "East" },
+  "Minnesota Vikings": { abbr: "min", conference: "NFC", division: "North" },
+  "New England Patriots": { abbr: "ne", conference: "AFC", division: "East" },
+  "New Orleans Saints": { abbr: "no", conference: "NFC", division: "South" },
+  "New York Giants": { abbr: "nyg", conference: "NFC", division: "East" },
+  "New York Jets": { abbr: "nyj", conference: "AFC", division: "East" },
+  "Philadelphia Eagles": { abbr: "phi", conference: "NFC", division: "East" },
+  "Pittsburgh Steelers": { abbr: "pit", conference: "AFC", division: "North" },
+  "San Francisco 49ers": { abbr: "sf", conference: "NFC", division: "West" },
+  "Seattle Seahawks": { abbr: "sea", conference: "NFC", division: "West" },
+  "Tampa Bay Buccaneers": { abbr: "tb", conference: "NFC", division: "South" },
+  "Tennessee Titans": { abbr: "ten", conference: "AFC", division: "South" },
+  "Washington Commanders": { abbr: "wsh", conference: "NFC", division: "East" },
+};
+
 const YEAR = 2026;
 const ROUNDS = 7;
 const RANDOM_SEED = 2026;
@@ -128,6 +163,7 @@ function initUI(picks, source, generatedAt) {
   const teamSelect = document.getElementById("team-select");
   const roundResults = document.getElementById("round-results");
   const teamResults = document.getElementById("team-results");
+  const teamSummary = document.getElementById("team-summary");
 
   const roundTab = document.getElementById("round-tab");
   const teamTab = document.getElementById("team-tab");
@@ -165,8 +201,8 @@ function initUI(picks, source, generatedAt) {
   }
 
   function showTeam(team) {
-    const rows = picks
-      .filter((pick) => pick.team === team)
+    const teamPicks = picks.filter((pick) => pick.team === team);
+    const rows = teamPicks
       .map((pick) => [
         pick.overall_pick,
         `Round ${pick.round_number} Pick ${pick.round_pick}`,
@@ -174,6 +210,29 @@ function initUI(picks, source, generatedAt) {
         pick.position || "",
         pick.college || "",
       ]);
+    const teamMeta = TEAM_METADATA[team];
+    const pickNumbers = teamPicks.map((pick) => Number(pick.overall_pick)).filter((pickNo) => Number.isFinite(pickNo));
+    const firstPick = pickNumbers.length > 0 ? Math.min(...pickNumbers) : "—";
+    const lastPick = pickNumbers.length > 0 ? Math.max(...pickNumbers) : "—";
+    const logoUrl = teamMeta ? `https://a.espncdn.com/i/teamlogos/nfl/500/${teamMeta.abbr}.png` : "";
+    const conferenceAndDivision = teamMeta ? `${teamMeta.conference} ${teamMeta.division}` : "NFL";
+
+    teamSummary.innerHTML = `
+      <article class="team-card">
+        <div class="team-card__identity">
+          ${logoUrl ? `<img class="team-card__logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(team)} logo" loading="lazy">` : ""}
+          <div>
+            <h2 class="team-card__name">${escapeHtml(team)}</h2>
+            <p class="team-card__meta">${teamMeta ? `${escapeHtml(teamMeta.abbr.toUpperCase())} · ${escapeHtml(conferenceAndDivision)}` : ""}</p>
+          </div>
+        </div>
+        <dl class="team-card__stats">
+          <div><dt>Total picks</dt><dd>${teamPicks.length}</dd></div>
+          <div><dt>Earliest</dt><dd>#${firstPick}</dd></div>
+          <div><dt>Latest</dt><dd>#${lastPick}</dd></div>
+        </dl>
+      </article>
+    `;
     renderTable(teamResults, ["Overall", "Pick", "Player", "Pos", "College"], rows);
   }
 
