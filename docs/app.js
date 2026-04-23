@@ -150,7 +150,14 @@ function renderTable(container, headers, rows) {
 function setSourceBanner(source, generatedAt) {
   const banner = document.getElementById("source-banner");
   if (!banner) return;
-  const label = source === "nfl_data_py" ? "Real picks (nfl_data_py)" : `Simulated draft (${source})`;
+  let label;
+  if (source === "nfl_data_py") {
+    label = "Real picks (nfl_data_py)";
+  } else if (source && source.includes("needs-based")) {
+    label = `Need-based simulation (${source})`;
+  } else {
+    label = `Simulated draft (${source})`;
+  }
   const dateStr = generatedAt ? ` · updated ${new Date(generatedAt).toLocaleString()}` : "";
   banner.textContent = `Data source: ${label}${dateStr}`;
   banner.classList.remove("hidden");

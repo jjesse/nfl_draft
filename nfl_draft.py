@@ -5,11 +5,12 @@ import csv
 from dataclasses import dataclass
 from functools import lru_cache
 from io import StringIO
+import json
 import pathlib
 from random import Random
 from urllib.error import URLError
 from urllib.request import urlopen
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 
 NFL_TEAMS = [
@@ -82,6 +83,56 @@ NFL_TEAM_ABBREVIATIONS: dict[str, str] = {
     "TEN": "Tennessee Titans",
     "WAS": "Washington Commanders",
 }
+
+
+# ---------------------------------------------------------------------------
+# Position normalisation – maps Drafttek-specific codes to canonical groups
+# used in team needs lists.
+# ---------------------------------------------------------------------------
+
+POSITION_GROUPS: Dict[str, str] = {
+    # Defensive line variants → DL
+    "DL1T": "DL",
+    "DL3T": "DL",
+    "DL5T": "DL",
+    # Outside linebacker treated as edge rusher
+    "OLB": "EDGE",
+    # Nickel corner → CB
+    "CBN": "CB",
+    # Slot receiver → WR
+    "WRS": "WR",
+}
+
+
+def _canonical_position(raw_pos: str) -> str:
+    """Return the canonical positional group for a raw Drafttek position code.
+
+    Positions not listed in :data:`POSITION_GROUPS` map to themselves.
+    """
+    return POSITION_GROUPS.get(raw_pos, raw_pos)
+
+
+# ---------------------------------------------------------------------------
+# Team needs data – loaded once from the bundled JSON file
+# ---------------------------------------------------------------------------
+
+TEAM_NEEDS_PATH = pathlib.Path(__file__).parent / "team_needs_2026.json"
+
+
+@lru_cache(maxsize=1)
+def load_team_needs() -> Dict[str, List[str]]:
+    """Return 2026 positional needs per team, loaded from *team_needs_2026.json*.
+
+    Each value is an ordered list of canonical position codes (most critical
+    first).  Returns an empty dict when the file is missing or malformed.
+    """
+    try:
+        data = json.loads(TEAM_NEEDS_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return {str(k): [str(v) for v in vs] for k, vs in data.items()}
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return {}
 
 
 @dataclass(frozen=True)
@@ -416,6 +467,26 @@ def import_actual_draft_picks(year: int) -> List[DraftPick]:
     return _fetch_actual_draft_picks(year)
 
 
+def _pick_by_need(
+    pool: List[ProspectInfo],
+    team: str,
+    team_needs: Dict[str, List[str]],
+) -> int:
+    """Return the index of the best prospect in *pool* for *team*'s needs.
+
+    Scans the team's positional needs in priority order and returns the index
+    of the highest-ranked available prospect (lowest index = highest rank) that
+    matches each need in turn.  Falls back to index 0 (Best Player Available)
+    when no prospect matches any listed need.
+    """
+    needs = team_needs.get(team, [])
+    for need in needs:
+        for idx, prospect in enumerate(pool):
+            if _canonical_position(prospect.position) == need:
+                return idx
+    return 0  # BPA fallback
+
+
 def simulate_draft(
     *,
     year: int = 2026,
@@ -424,6 +495,7 @@ def simulate_draft(
     pick_sequence: Optional[List[Tuple[int, str]]] = None,
     random_seed: int = 2026,
     prospects: Union[Iterable[Union[str, ProspectInfo]], None] = None,
+    use_team_needs: bool = False,
 ) -> List[DraftPick]:
     """Simulate a draft and return a list of :class:`DraftPick` objects.
 
@@ -441,6 +513,12 @@ def simulate_draft(
     1. Local Drafttek CSV (``drafttek_2026_top600_with_bio.csv``).
     2. Remote mock-draft CSV (cwecht15/Mock-Draft-Database on GitHub).
     3. Generated placeholder names.
+
+    When *use_team_needs* is ``True`` the prospect pool is kept in rank order
+    and each team selects the highest-ranked available player that fits its top
+    positional need (greedy need-based selection).  When no need is matched the
+    best available player is chosen instead.  When ``False`` (default) the
+    original random-shuffle behaviour is used.
     """
     if pick_sequence is not None:
         total_picks = len(pick_sequence)
@@ -464,19 +542,43 @@ def simulate_draft(
         if not prospect_infos:
             prospect_infos = [ProspectInfo(name=n) for n in get_real_2026_prospects()]
 
-    randomized = prospect_infos[:total_picks]
-    if len(randomized) < total_picks:
-        randomized = randomized + [
-            ProspectInfo(name=p) for p in _default_prospects(total_picks - len(randomized))
+    pool = prospect_infos[:total_picks]
+    if len(pool) < total_picks:
+        pool = pool + [
+            ProspectInfo(name=p) for p in _default_prospects(total_picks - len(pool))
         ]
-    Random(random_seed).shuffle(randomized)
+
+    # Build a callable that returns the next prospect for a given picking team.
+    selector: Callable[[str], ProspectInfo]
+    if use_team_needs:
+        # Need-based mode: keep pool in rank order; select greedily by need.
+        team_needs_map = load_team_needs()
+        mutable_pool = list(pool)
+
+        class _NeedsSelector:
+            def __call__(self, team: str) -> ProspectInfo:
+                idx = _pick_by_need(mutable_pool, team, team_needs_map)
+                return mutable_pool.pop(idx)
+
+        selector = _NeedsSelector()
+    else:
+        # Random mode (original behaviour): shuffle then assign by index.
+        randomized = list(pool)
+        Random(random_seed).shuffle(randomized)
+        pick_iter = iter(randomized)
+
+        class _RandomSelector:  # type: ignore[no-redef]
+            def __call__(self, team: str) -> ProspectInfo:
+                return next(pick_iter)
+
+        selector = _RandomSelector()
 
     picks: List[DraftPick] = []
     if pick_sequence is not None:
         picks_per_round: dict[int, int] = {}
         for overall_pick, (round_number, team) in enumerate(pick_sequence, start=1):
             picks_per_round[round_number] = picks_per_round.get(round_number, 0) + 1
-            info = randomized[overall_pick - 1]
+            info = selector(team)
             picks.append(
                 DraftPick(
                     year=year,
@@ -494,7 +596,7 @@ def simulate_draft(
         overall_pick = 1
         for round_number in range(1, rounds + 1):
             for round_pick, team in enumerate(team_order, start=1):
-                info = randomized[overall_pick - 1]
+                info = selector(team)
                 picks.append(
                     DraftPick(
                         year=year,
@@ -524,6 +626,12 @@ def _parse_args() -> ArgumentParser:
         type=str,
         help="Optional team name to show only that team's draft picks.",
     )
+    parser.add_argument(
+        "--needs",
+        action="store_true",
+        default=False,
+        help="Use need-based player selection instead of random assignment.",
+    )
     return parser
 
 
@@ -538,16 +646,17 @@ def main() -> None:
         source = "nfl_data_py"
     else:
         draft_order = get_draft_order(2026)
-        picks = simulate_draft(pick_sequence=draft_order or None)
+        picks = simulate_draft(pick_sequence=draft_order or None, use_team_needs=args.needs)
+        mode = "needs-based" if args.needs else "random"
         if draft_order:
             remote = _fetch_draft_order_from_nflverse(2026)
             source = (
-                "simulation with nflverse draft order"
+                f"simulation ({mode}) with nflverse draft order"
                 if remote
-                else "simulation with hardcoded 2026 draft order (picks 1–24 official, rest estimated)"
+                else f"simulation ({mode}) with hardcoded 2026 draft order (picks 1–24 official, rest estimated)"
             )
         else:
-            source = "simulation (nfl_data_py data not yet available)"
+            source = f"simulation ({mode}) (nfl_data_py data not yet available)"
 
     selected_picks = picks if not args.team else get_team_picks(picks, args.team)
 
